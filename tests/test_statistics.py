@@ -1,6 +1,7 @@
 from datetime import date, datetime, timedelta, timezone
 
 from app.models import (
+    AdditionalAgreement,
     Application,
     ApplicationFaculty,
     Contract,
@@ -86,7 +87,7 @@ def test_statistics_counts_unique_documents_and_respects_faculty_context(session
 
     filtered = registry_statistics(session, faculty_a.id, today=today, now=now)
     contract_rows, *_ = registry(session, faculty=faculty_a.name)
-    application_page, _ = application_registry(session, faculty=faculty_a.name)
+    application_page, *_ = application_registry(session, faculty=faculty_a.name)
     assert filtered.total_organizations == 3
     assert filtered.total_contracts == len(contract_rows) == 2
     assert filtered.total_applications == application_page.total == 2
@@ -111,5 +112,33 @@ def test_application_attention_filter_includes_overdue_and_due_dates_only(sessio
     _application(session, organization, faculty, specialty, "NO-DATE", "Заявка", None, datetime.now(timezone.utc))
     session.commit()
 
-    page, _ = application_registry(session, urgency="due_30")
+    page, *_ = application_registry(session, urgency="due_30")
     assert {row.number for row in page.rows} == {"OVERDUE", "DUE"}
+
+
+def test_active_contract_statistics_include_active_agreements(session, client):
+    today = date.today()
+    faculty = Faculty(name="Факультет действующих д.с.")
+    specialty = Specialty(code="AGREEMENT-STAT", name="AGREEMENT-STAT")
+    organizations = [_organization(index, datetime.now(timezone.utc)) for index in range(7, 10)]
+    session.add_all([faculty, specialty, *organizations])
+    session.flush()
+
+    mtz = _contract(session, organizations[0], faculty, specialty, "221-АТФ/280", "Закрыт", today - timedelta(days=20))
+    maz = _contract(session, organizations[1], faculty, specialty, "535/6596", "Активен", today + timedelta(days=20))
+    closed = _contract(session, organizations[2], faculty, specialty, "CLOSED", "Закрыт", today - timedelta(days=20))
+    mtz.agreements.append(AdditionalAgreement(number="1", date=today, status="Активен"))
+    maz.agreements.append(AdditionalAgreement(number="1", date=today, status="Активен"))
+    session.commit()
+
+    statistics = registry_statistics(session, today=today)
+    assert (statistics.active_contracts, statistics.total_contracts) == (2, 3)
+    assert statistics.organizations_with_contracts == 3
+    assert statistics.total_active_documents == 2
+    assert statistics.attention_contracts == 0
+
+    registry_page = client.get("/contracts")
+    organization_card = client.get(f"/organizations/{mtz.organization_id}")
+    note = f"действует д.с. №1 от {today.strftime('%d.%m.%Y')}"
+    assert note in registry_page.text
+    assert note in organization_card.text

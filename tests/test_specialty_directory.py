@@ -62,6 +62,7 @@ def test_head_can_view_but_cannot_edit_specialty_directory(session):
         page = browser.get("/specialties")
         assert page.status_code == 200
         assert "HEAD-01" in page.text
+        assert "Редактирование доступно администратору" in page.text
         assert 'action="/specialties/' not in page.text
         assert browser.post(
             f"/specialties/{specialty.id}",

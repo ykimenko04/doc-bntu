@@ -34,7 +34,7 @@ def test_contract_export_uses_registry_filters_and_full_export_has_all(
     filtered = client.get("/export/contracts", params={
         "status": "Активен", "q": contract.number,
         "faculty": contract.faculty_links[0].faculty.name,
-        "end_year": str(contract.end_date.year), "urgency": "later",
+        "end_year": str(contract.end_date.year), "urgency": "due_over",
     })
     assert full.status_code == filtered.status_code == 200
     assert len(_rows(full)) == 3
@@ -94,6 +94,36 @@ def test_application_export_uses_filters_and_contains_specialty_codes(
         ("faculty", "Факультет заявок"), ("faculty", "Другой факультет заявок"),
     ]))
     assert {row[6] for row in multi[1:]} == {"APP-SPEC", "APP-CLOSED", "APP-OTHER"}
+
+
+def test_application_export_respects_end_year_and_extended_urgency(
+    session, organization, user, actor, client
+):
+    today = date.today()
+    medium = create_application(
+        session, organization.id, ["Факультет экспорта"], "APP-MIDDLE", "",
+        (today + timedelta(days=60)).isoformat(), user.id, audit_actor=actor,
+    )
+    far = create_application(
+        session, organization.id, ["Факультет экспорта"], "APP-FAR", "",
+        (today + timedelta(days=400)).isoformat(), user.id, audit_actor=actor,
+    )
+    no_date = create_application(
+        session, organization.id, ["Факультет экспорта"], "APP-NO-DATE", "", "",
+        user.id, audit_actor=actor,
+    )
+    for application, code in ((medium, "SPEC-MIDDLE"), (far, "SPEC-FAR"), (no_date, "SPEC-NONE")):
+        save_application_item(session, application, code, "", {
+            "faculty_id": str(application.faculty_links[0].faculty_id), "demand_2027": "1",
+        }, audit_actor=actor)
+
+    medium_rows = _rows(client.get("/export/applications", params={"urgency": "due_90"}))
+    far_rows = _rows(client.get("/export/applications", params={
+        "q": "APP-FAR", "end_year": str(far.date_end.year), "urgency": "due_over",
+    }))
+    assert [row[6] for row in medium_rows[1:]] == ["SPEC-MIDDLE"]
+    assert [row[6] for row in far_rows[1:]] == ["SPEC-FAR"]
+    assert "SPEC-NONE" not in {row[6] for row in medium_rows[1:] + far_rows[1:]}
 
 
 def test_import_export_page_has_history_controls_and_registry_is_clean(client, session, user):

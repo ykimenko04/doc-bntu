@@ -660,7 +660,7 @@ diff аудита.
   специальности;
 - `faculty_id` — идентификатор факультета;
 - `end_year` — четырёхзначный год окончания договора;
-- `urgency` — `due_30`, `due_90` или `later`;
+- `urgency` — `due_30`, `due_90` или `due_over`;
 - `page`, `per_page`.
 
 Строка ответа — представление
@@ -717,7 +717,7 @@ diff аудита.
         "6-05-0715-12"
       ],
       "faculty_count": 11,
-      "urgency": "later",
+      "urgency": "due_over",
       "days_until_expiry": 1559,
       "overdue": false
     }
@@ -827,7 +827,7 @@ diff аудита.
 Доступ: обе роли.
 
 Параметры: `q`, `faculty_id`, `status` (`Активен`/`Закрыт`), `end_year`,
-`urgency` (`due_30`/`due_90`/`later`), `page`, `per_page`.
+`urgency` (`due_30`/`due_90`/`due_over`), `page`, `per_page`.
 
 ```json
 {
@@ -852,7 +852,7 @@ diff аудита.
       "specialty_count": 60,
       "current_order_id": 1,
       "active_agreement": null,
-      "urgency": "later",
+      "urgency": "due_over",
       "days_until_expiry": 1559,
       "overdue": false
     }
@@ -1380,8 +1380,23 @@ Content-Type: application/json
 Ошибки: `401`, `403`, `404`; `409` — попытка снять роль с единственного
 администратора; `422` — пустое ФИО или неизвестная роль.
 
-Удаление, блокировка и административный сброс пароля — **уточним**. Не
-добавлять для них элементы интерфейса до отдельного контракта.
+#### `PATCH /api/users/{id}/status` — STABLE
+
+Только для администратора. Деактивация немедленно завершает действующие
+сессии пользователя; старые записи журнала и ФИО пользователя сохраняются.
+
+```json
+{"is_active": false}
+```
+
+Ответ `200 OK` — объект пользователя в формате `UserResponse`, где
+`is_active` содержит новое значение. Для реактивации передать `true`.
+
+Ошибки: `400` — попытка деактивировать себя или последнего активного
+администратора; `401`, `403`, `404`, `422`.
+
+Удаление пользователей запрещено. Административный сброс пароля выполняется
+через `POST /api/users/{id}/reset-password`.
 
 ### 2.9. Импорт Excel
 
@@ -1592,7 +1607,9 @@ TypeScript-типов и HTTP-клиента использовать `/openapi.
   номера — `number`; даты — `date_start` и `date_end`; комментарий статуса
   необязателен для договора, д.с. и заявки.
 - `applications`: список, карточка, создание, изменение и смена статуса.
-  Используются `signed_date` и опциональное `date_end`.
+  Используются `signed_date` и опциональное `date_end`. Реестр и экспорт
+  принимают `end_year`; бакеты `urgency` одинаковы с договорами:
+  `due_30`, `due_90`, `due_over`.
 - `orders`: `GET /api/orders/{order_id}`, добавление строки через
   `POST /api/orders/{order_id}/items` либо
   `POST /api/contracts/{contract_id}/order-items` для нового пустого договора,
@@ -1606,8 +1623,11 @@ TypeScript-типов и HTTP-клиента использовать `/openapi.
   из `docs/audit-event-types.md`.
 - `users`: список, создание, изменение ФИО/роли и сброс пароля. Все операции
   доступны только ADMIN. Email обязателен при создании и уникален.
-- `settings`: `GET /api/settings/profile`; изменение email и пароля выполняется
-  через маршруты `auth`, также отмеченные тегом `settings`.
+- `settings`: для профиля использовать `GET /api/auth/me`. Дубль
+  `GET /api/settings/profile` помечен `deprecated: true` и временно сохранён
+  только для совместимости; новый React-код не должен его использовать.
+  Изменение email и пароля выполняется через маршруты `auth`, также отмеченные
+  тегом `settings`.
 - `import-export`: `POST /api/import` (`multipart/form-data`: `file`,
   `create_new`), `POST /api/reconciliation`, скачивание отчёта сверки,
   история импортов и XLSX-экспорт договоров/заявок. Экспорт расположен по
@@ -1696,7 +1716,7 @@ TypeScript-типов и HTTP-клиента использовать `/openapi.
 | `orders` | Чтение редакции и мутации строк — готовы; годы имеют строковые ключи |
 | `audit` | Реестр с фильтрами и маппинг русских подписей — готовы |
 | `users` | Список, создание, изменение и сброс пароля — готовы только для ADMIN |
-| `settings` | `GET /api/settings/profile`, `GET /api/auth/me`, `PUT /api/auth/email` и `POST /api/auth/change-password` готовы для обеих ролей; реквизитов БНТУ нет |
+| `settings` | Использовать `GET /api/auth/me`, `PUT /api/auth/email` и `POST /api/auth/change-password`; `/api/settings/profile` — deprecated-дубль |
 | `import-export` | Импорт, сверка АИС, история и построчный XLSX-экспорт — готовы |
 | `specialties` | Факультеты, справочник специальностей и административное редактирование — готовы |
 

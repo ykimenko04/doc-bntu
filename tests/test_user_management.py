@@ -2,7 +2,8 @@ from sqlalchemy import select
 from fastapi.testclient import TestClient
 
 from app.models import AppUser, AuditLog
-from app.services.auth_service import create_user, hash_password, verify_password
+from app.services.audit_registry_service import get_audit_registry
+from app.services.auth_service import create_user, hash_password, set_user_active, verify_password
 
 
 def test_empty_database_allows_one_time_admin_setup(session):
@@ -134,3 +135,78 @@ def test_admin_can_edit_name_and_role_but_not_demote_last_admin(client, session)
     second = session.get(AppUser, second.id)
     assert second.full_name == "Обновлённое имя"
     assert second.role == "HEAD"
+
+
+def test_admin_deactivates_and_reactivates_user_with_audit_and_session_revocation(client, session):
+    from app.main import app
+
+    head = create_user(
+        session, "Отключаемый сотрудник", "disabled-head", "disabled-head@example.com",
+        "HEAD", "Head-password-123", force_password_change=False,
+    )
+    session.add(AuditLog(
+        user_id=head.id,
+        action="UPDATE",
+        entity_type="app_user",
+        entity_id=head.id,
+        entity_label="Пользователь Отключаемый сотрудник",
+        diff={"old": {}, "new": {"full_name": "Отключаемый сотрудник"}},
+    ))
+    session.commit()
+    with TestClient(app, follow_redirects=False) as head_browser:
+        assert head_browser.post("/login", data={
+            "username": head.username, "password": "Head-password-123",
+        }).status_code == 303
+
+        disabled = client.post(f"/users/{head.id}/status", data={"is_active": "false"})
+        assert disabled.status_code == 303
+        session.expire_all()
+        assert session.get(AppUser, head.id).is_active is False
+
+        revoked = head_browser.get("/")
+        assert revoked.status_code == 303
+        assert revoked.headers["location"] == "/login?disabled=1"
+        login_page = head_browser.get(revoked.headers["location"])
+        assert "Учётная запись отключена. Обратитесь к администратору" in login_page.text
+        refused = head_browser.post("/login", data={
+            "username": head.username, "password": "Head-password-123",
+        })
+        assert refused.status_code == 401
+        assert "Учётная запись отключена. Обратитесь к администратору" in refused.text
+
+    registry = client.get("/users")
+    assert "отключён" in registry.text
+    assert "user-disabled" in registry.text
+    event = session.scalars(select(AuditLog).where(
+        AuditLog.entity_type == "app_user",
+        AuditLog.entity_id == head.id,
+        AuditLog.action == "UPDATE",
+    ).order_by(AuditLog.id.desc())).first()
+    assert event.diff == {"old": {"is_active": True}, "new": {"is_active": False}}
+    assert event.user_id == session.scalar(select(AppUser.id).where(AppUser.username == "test-admin"))
+    old_rows = get_audit_registry(session, user=str(head.id))
+    assert old_rows.rows[0].employee == "Отключаемый сотрудник"
+
+    enabled = client.patch(f"/api/users/{head.id}/status", json={"is_active": True})
+    assert enabled.status_code == 200
+    assert enabled.json()["is_active"] is True
+    session.expire_all()
+    assert session.get(AppUser, head.id).is_active is True
+    with TestClient(app, follow_redirects=False) as browser:
+        assert browser.post("/login", data={
+            "username": head.username, "password": "Head-password-123",
+        }).status_code == 303
+
+
+def test_user_deactivation_protects_self_and_last_active_admin(client, session):
+    admin = session.scalar(select(AppUser).where(AppUser.username == "test-admin"))
+    self_blocked = client.post(f"/users/{admin.id}/status", data={"is_active": "false"})
+    assert self_blocked.status_code == 400
+    assert "собственную учётную запись" in self_blocked.text
+
+    try:
+        set_user_active(session, admin, False, actor_user_id=999)
+    except ValueError as error:
+        assert "последнего активного администратора" in str(error)
+    else:
+        raise AssertionError("Деактивация последнего администратора должна быть запрещена")

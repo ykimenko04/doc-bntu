@@ -47,13 +47,15 @@ document.querySelectorAll('.faculty-multiselect').forEach((picker) => {
 
   inputs.forEach((input) => input.addEventListener('change', refreshSummary));
   search.addEventListener('input', filterAndRank);
-  picker.closest('form').addEventListener('submit', (event) => {
-    if (!picker.dataset.optional && !inputs.some((input) => input.checked)) {
-      event.preventDefault();
-      picker.open = true;
-      summary.textContent = 'Выберите хотя бы один факультет';
-    }
-  });
+  if (!picker.dataset.optional) {
+    picker.closest('form').addEventListener('submit', (event) => {
+      if (!inputs.some((input) => input.checked)) {
+        event.preventDefault();
+        picker.open = true;
+        summary.textContent = 'Выберите хотя бы один факультет';
+      }
+    });
+  }
   refreshSummary();
 });
 

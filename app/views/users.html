@@ -9,13 +9,13 @@
     <thead><tr><th>ФИО</th><th>Логин</th><th>Электронная почта</th><th>Роль</th><th>Дата создания</th><th></th></tr></thead>
     <tbody>
       {% for user in users %}
-      <tr>
-        <td><strong>{{ user.full_name or '—' }}</strong>{% if user.must_change_password %}<span class="rotation-badge">Ожидается смена пароля</span>{% endif %}</td>
+      <tr class="{{ 'user-disabled' if not user.is_active }}">
+        <td><strong>{{ user.full_name or '—' }}</strong>{% if not user.is_active %}<span class="disabled-badge">отключён</span>{% elif user.must_change_password %}<span class="rotation-badge">Ожидается смена пароля</span>{% endif %}</td>
         <td>{{ user.username }}</td>
         <td>{{ user.email or 'Не указана' }}</td>
         <td>{{ 'Администратор' if user.role == 'ADMIN' else 'Руководитель отдела' }}</td>
         <td>{{ user.created_at.strftime('%d.%m.%Y') if user.created_at else '—' }}</td>
-        <td class="actions-cell"><a class="secondary-button" href="/users/{{ user.id }}/edit">Редактировать</a></td>
+        <td class="actions-cell"><a class="secondary-button" href="/users/{{ user.id }}/edit">Редактировать</a><form method="post" action="/users/{{ user.id }}/status" onsubmit="return confirm('{{ 'Активировать' if not user.is_active else 'Деактивировать' }} пользователя?')"><input type="hidden" name="is_active" value="{{ 'true' if not user.is_active else 'false' }}"><button class="link-button" type="submit">{{ 'Активировать' if not user.is_active else 'Деактивировать' }}</button></form></td>
       </tr>
       {% endfor %}
     </tbody>

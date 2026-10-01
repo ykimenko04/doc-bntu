@@ -17,6 +17,10 @@ USER_ROLES = {"ADMIN", "HEAD"}
 EMAIL_ADAPTER = TypeAdapter(EmailStr)
 
 
+class AccountDisabledError(ValueError):
+    pass
+
+
 def hash_password(password: str) -> str:
     salt = os.urandom(16)
     digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, PBKDF2_ITERATIONS)
@@ -145,10 +149,36 @@ def update_email(session: Session, user: AppUser, email: str) -> AppUser:
     return user
 
 
+@audited
+def set_user_active(
+    session: Session,
+    user: AppUser,
+    is_active: bool,
+    *,
+    actor_user_id: int | None = None,
+) -> AppUser:
+    if user.is_active == is_active:
+        return user
+    if not is_active:
+        if actor_user_id == user.id:
+            raise ValueError("Нельзя деактивировать собственную учётную запись.")
+        if user.role == "ADMIN":
+            active_admins = session.query(AppUser.id).filter(
+                AppUser.role == "ADMIN",
+                AppUser.is_active.is_(True),
+            ).count()
+            if active_admins <= 1:
+                raise ValueError("Нельзя деактивировать последнего активного администратора.")
+    user.is_active = is_active
+    return user
+
+
 def authenticate(session: Session, username: str, password: str, ip_address: str | None = None) -> AppUser | None:
     user = session.query(AppUser).filter(func.lower(AppUser.username) == username.strip().lower()).one_or_none()
-    if not user or not user.is_active or not verify_password(password, user.password_hash):
+    if not user or not verify_password(password, user.password_hash):
         return None
+    if not user.is_active:
+        raise AccountDisabledError("Учётная запись отключена. Обратитесь к администратору")
     login_at = datetime.now(timezone.utc)
     with AuditBatch(session, AuditActor(user.id, ip_address)) as audit:
         audit.suppress(user)

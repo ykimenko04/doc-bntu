@@ -5,19 +5,17 @@
     <option value="">Все статусы</option>
     {% for status in statuses %}<option value="{{ status }}" {{ 'selected' if status == selected_status }}>{{ status }}</option>{% endfor %}
   </select>
-  {% if registry_kind == 'contracts' %}
+  {% if registry_kind in ('contracts', 'applications') %}
     <select name="end_year">
       <option value="">Любой год окончания</option>
       {% for year in end_years %}<option value="{{ year|int }}" {{ 'selected' if selected_end_year == year|string }}>{{ year|int }}</option>{% endfor %}
     </select>
     <input type="hidden" name="urgency" value="{{ selected_urgency }}">
-  {% elif registry_kind == 'applications' %}
-    <label class="urgency-toggle urgency-due_30{{ ' active' if selected_urgency == 'due_30' }}"><input type="checkbox" name="urgency" value="due_30" {{ 'checked' if selected_urgency == 'due_30' }}> ≤ 30 дней</label>
   {% endif %}
   <button>Фильтровать</button>
   <a class="button secondary" href="/export/{{ registry_kind }}{% if export_query %}?{{ export_query }}{% endif %}">Экспорт</a>
-  {% if registry_kind == 'contracts' %}
-    <div class="urgency-filters" aria-label="Срок окончания договора">
+  {% if registry_kind in ('contracts', 'applications') %}
+    <div class="urgency-filters" aria-label="Срок окончания {{ registry_item_genitive }}">
       {% for key, label in urgency_buckets %}<button type="submit" name="urgency_choice" value="{{ key }}" class="urgency-toggle urgency-{{ key }}{{ ' active' if selected_urgency == key }}" aria-pressed="{{ 'true' if selected_urgency == key else 'false' }}">{{ label }} <span>{{ urgency_counts.get(key, 0) }}</span></button>{% endfor %}
     </div>
   {% endif %}

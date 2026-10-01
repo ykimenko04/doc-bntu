@@ -118,3 +118,24 @@ def test_json_validation_errors_are_readable(client):
     assert invalid.status_code == 422
     assert set(invalid.json()) == {"detail"}
     assert invalid.json()["detail"]
+
+
+def test_contract_order_item_without_qualification_is_returned_as_null(client, session, contract):
+    specialty = Specialty(code="6-05-0718-01", name="6-05-0718-01", qualification=None)
+    session.add(specialty)
+    session.commit()
+    faculty_id = contract.faculty_links[0].faculty_id
+
+    created = client.post(f"/api/contracts/{contract.id}/order-items", json={
+        "faculty_id": faculty_id,
+        "specialty_id": specialty.id,
+        "profile": None,
+        "qualification": None,
+        "years": {"2026": 4},
+    })
+    assert created.status_code == 201, created.text
+    assert created.json()["qualification"] is None
+
+    card = client.get(f"/api/contracts/{contract.id}")
+    assert card.status_code == 200
+    assert card.json()["current_order"]["items"][0]["qualification"] is None

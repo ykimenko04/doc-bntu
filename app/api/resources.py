@@ -37,7 +37,7 @@ from ..services.application_service import create_application, save_application_
 from ..services.audit_metadata import ACTION_LABELS, ENTITY_FILTERS
 from ..services.audit_registry_service import get_audit_registry
 from ..services.audit_service import AuditActor
-from ..services.auth_service import create_user, reset_password, update_user
+from ..services.auth_service import create_user, reset_password, set_user_active, update_user
 from ..services.document_registry_service import application_registry, contract_registry
 from ..services.document_status_service import (
     StatusTransitionError,
@@ -65,6 +65,11 @@ from .schemas import AuthenticatedUserResponse, ErrorResponse
 
 
 router = APIRouter()
+
+ContractStatusFilter = Literal["Активен", "Закрыт"]
+ApplicationStatusFilter = Literal["Заявка", "Закрыт"]
+ContractUrgencyFilter = Literal["due_30", "due_90", "due_over"]
+ApplicationUrgencyFilter = Literal["due_30", "due_90", "due_over"]
 
 
 def get_session():
@@ -113,7 +118,10 @@ class FacultyResponse(ApiModel):
 class SpecialtyResponse(ApiModel):
     id: int = Field(examples=[1])
     code: str = Field(examples=["1-37 01 03"])
-    name: str = Field(examples=["Автомобилестроение"])
+    name: str = Field(
+        examples=["1-37 01 03"],
+        description="Название; если выгрузка не содержит названия, хранится и возвращается код специальности.",
+    )
     profile: str | None = Field(default=None, examples=["Проектирование автомобилей"])
     qualification: str | None = Field(default=None, examples=["Инженер-механик"])
     faculty: str | None = Field(default=None, examples=["Автотракторный"])
@@ -133,7 +141,7 @@ class OrderItemResponse(ApiModel):
     specialty_code: str
     specialty_name: str
     profile: str | None
-    qualification: str
+    qualification: str | None
     years: dict[str, int] = Field(examples=[{"2026": 15, "2027": 16}])
 
 
@@ -193,7 +201,7 @@ class ContractListItem(ApiModel):
     number: str = Field(examples=["221-АТФ/280"])
     date_start: date = Field(examples=["2020-10-01"])
     date_end: date | None = Field(examples=["2030-12-31"])
-    status: str = Field(examples=["Активен"])
+    status: Literal["Активен", "Закрыт"] = Field(examples=["Активен"])
     faculties: list[FacultyResponse]
     specialty_count: int = Field(examples=[60])
     has_signed_scan: bool
@@ -242,7 +250,7 @@ class ApplicationListItem(ApiModel):
     number: str | None = Field(examples=["З-2026/15"])
     signed_date: date | None = Field(examples=["2026-09-25"])
     date_end: date | None = Field(examples=["2027-09-25"])
-    status: str = Field(examples=["Заявка"])
+    status: Literal["Заявка", "Закрыт"] = Field(examples=["Заявка"])
     faculties: list[FacultyResponse]
     specialty_count: int
     has_signed_scan: bool
@@ -354,7 +362,7 @@ class SpecialtyPage(PageMeta):
 
 
 class StatusChangeRequest(BaseModel):
-    status: str = Field(examples=["Закрыт"])
+    status: Literal["Активен", "Заявка", "Закрыт"] = Field(examples=["Закрыт"])
     comment: str | None = Field(default=None, examples=["Срок действия завершён"])
 
 
@@ -456,6 +464,10 @@ class UserUpdate(BaseModel):
     role: Literal["ADMIN", "HEAD"]
 
 
+class UserStatusUpdate(BaseModel):
+    is_active: bool = Field(description="true — активировать, false — деактивировать")
+
+
 class PasswordReset(BaseModel):
     new_password: str = Field(min_length=8, examples=["temporary-2026"])
 
@@ -550,7 +562,7 @@ def item_data(value: OrderItem) -> dict:
         "specialty_code": value.specialty_ref.code,
         "specialty_name": value.specialty_ref.name,
         "profile": value.profile,
-        "qualification": value.qualification,
+        "qualification": value.qualification_value or value.specialty_ref.qualification,
         "years": {str(row.year): row.quantity for row in value.annual_demands},
     }
 
@@ -676,13 +688,18 @@ def save_specialty_api(specialty_id: int, payload: SpecialtyUpdate, request: Req
 @router.get("/organizations", tags=["organizations"], response_model=OrganizationPage, responses=ERRORS,
             summary="Получить факультетские строки реестра организаций")
 def organizations(q: str = Query("", examples=["МТЗ"]), faculty_id: int | None = None,
-                  end_year: int | None = None, urgency: str = Query("", examples=["due_30"]),
+                  status_value: ContractStatusFilter | None = Query(None, alias="status"),
+                  end_year: int | None = None, urgency: ContractUrgencyFilter | None = Query(None),
                   page: int = Query(1, ge=1), per_page: int = Query(50, ge=1, le=100),
                   _user: AppUser = Security(require_api_user), session: Session = Depends(get_session)):
     faculty = session.get(Faculty, faculty_id) if faculty_id else None
     if faculty_id and not faculty:
         raise HTTPException(404, "Факультет не найден.")
-    rows, *_ = organization_registry(session, q, faculty.name if faculty else "", str(end_year or ""), urgency)
+    rows, *_ = organization_registry(session, q, faculty.name if faculty else "", str(end_year or ""), urgency or "")
+    if status_value:
+        rows = [row for row in rows if (
+            row.contract.active_agreement.status if row.contract.active_agreement else row.contract.status
+        ) == status_value]
     total = len(rows)
     rows = rows[(page - 1) * per_page:page * per_page]
     return {
@@ -724,12 +741,13 @@ def statistics(faculty_id: int | None = None, _user: AppUser = Security(require_
 @router.get("/contracts", tags=["contracts"], response_model=ContractPage, responses=ERRORS,
             summary="Получить сквозной реестр договоров")
 def contracts(q: str = Query("", examples=["МТЗ"]), faculty_ids: list[int] = Query(default=[]),
-              status_value: str = Query("", alias="status", examples=["Активен"]), end_year: int | None = None,
-              urgency: str = Query("", examples=["due_30"]), page: int = Query(1, ge=1), per_page: int = Query(50, ge=1, le=100),
+              status_value: ContractStatusFilter | None = Query(None, alias="status"), end_year: int | None = None,
+              urgency: ContractUrgencyFilter | None = Query(None), page: int = Query(1, ge=1),
+              per_page: int = Query(50, ge=1, le=100),
               _user: AppUser = Security(require_api_user), session: Session = Depends(get_session)):
     names = faculty_names(session, faculty_ids)
-    result, *_ = contract_registry(session, query_text=q, faculty=names, status=status_value,
-                                   end_year=str(end_year or ""), urgency=urgency, page=None)
+    result, *_ = contract_registry(session, query_text=q, faculty=names, status=status_value or "",
+                                   end_year=str(end_year or ""), urgency=urgency or "", page=None)
     rows = result.rows[(page - 1) * per_page:page * per_page]
     return {"items": [contract_data(row.contract, effective_status=row.effective_status,
                                      specialty_count=row.specialty_count) for row in rows],
@@ -873,13 +891,16 @@ def compare_contract_orders(contract_id: int, first_id: int, second_id: int,
 
 
 @router.get("/applications", tags=["applications"], response_model=ApplicationPage, responses=ERRORS,
-            summary="Получить сквозной реестр заявок")
+            summary="Получить сквозной реестр заявок",
+            description="Поддерживает фильтр по году и бакету срочности поля «Действует до».")
 def applications(q: str = Query("", examples=["МТЗ"]), faculty_ids: list[int] = Query(default=[]),
-                 status_value: str = Query("", alias="status", examples=["Заявка"]), urgency: str = "",
+                 status_value: ApplicationStatusFilter | None = Query(None, alias="status"),
+                 end_year: int | None = Query(None), urgency: ApplicationUrgencyFilter | None = Query(None),
                  page: int = Query(1, ge=1), per_page: int = Query(50, ge=1, le=100),
                  _user: AppUser = Security(require_api_user), session: Session = Depends(get_session)):
-    result, _ = application_registry(session, query_text=q, faculty=faculty_names(session, faculty_ids),
-                                     status=status_value, urgency=urgency, page=None)
+    result, *_ = application_registry(session, query_text=q, faculty=faculty_names(session, faculty_ids),
+                                      status=status_value or "", end_year=str(end_year or ""),
+                                      urgency=urgency or "", page=None)
     rows = result.rows[(page - 1) * per_page:page * per_page]
     return {"items": [application_data(row) for row in rows], "total": result.total, "page": page, "per_page": per_page}
 
@@ -1025,11 +1046,11 @@ def delete_order_item(item_id: int, request: Request, user: AppUser = Security(r
 
 @router.get("/audit", tags=["audit"], response_model=AuditPage, responses=ERRORS,
             summary="Получить журнал действий")
-def audit(user_id: str = Query("", examples=["1"]), entity_type: str = "", action: str = "",
+def audit(user_id: int | None = Query(None, examples=[1]), entity_type: str = "", action: str = "",
           entity_id: int | None = None, date_from: date | None = None, date_to: date | None = None,
           search: str = "", page: int = Query(1, ge=1), per_page: int = Query(50, ge=1, le=100),
           _user: AppUser = Security(require_api_user), session: Session = Depends(get_session)):
-    result = get_audit_registry(session, user=user_id, entity=entity_type, entity_id=entity_id, action=action,
+    result = get_audit_registry(session, user=str(user_id or ""), entity=entity_type, entity_id=entity_id, action=action,
                                 date_from=date_from, date_to=date_to, query=search, page=page)
     records = {row.id: session.get(AuditLog, row.id) for row in result.rows}
     items = [{
@@ -1084,6 +1105,29 @@ def update_user_api(user_id: int, payload: UserUpdate, request: Request, admin: 
     return user_data(value)
 
 
+@router.patch("/users/{user_id}/status", tags=["users"], response_model=UserResponse, responses=ERRORS,
+              summary="Активировать или деактивировать пользователя",
+              description=("Только ADMIN. Нельзя деактивировать себя или последнего активного "
+                           "администратора. Деактивированный пользователь немедленно теряет доступ."))
+def update_user_status_api(user_id: int, payload: UserStatusUpdate, request: Request,
+                           admin: AppUser = Security(require_admin_user),
+                           session: Session = Depends(get_session)):
+    value = session.get(AppUser, user_id)
+    if not value:
+        raise HTTPException(404, "Пользователь не найден.")
+    try:
+        set_user_active(
+            session,
+            value,
+            payload.is_active,
+            actor_user_id=admin.id,
+            audit_actor=actor(request, admin),
+        )
+    except ValueError as error:
+        raise HTTPException(400, str(error)) from error
+    return user_data(value)
+
+
 @router.post("/users/{user_id}/reset-password", tags=["users"], status_code=204, responses=ERRORS,
              summary="Сбросить пароль пользователя", description="Только ADMIN. Ответ 204 без тела — это штатно.")
 def reset_user_password(user_id: int, payload: PasswordReset, request: Request,
@@ -1096,7 +1140,8 @@ def reset_user_password(user_id: int, payload: PasswordReset, request: Request,
 
 
 @router.get("/settings/profile", tags=["settings"], response_model=AuthenticatedUserResponse, responses=ERRORS,
-            summary="Получить профиль текущего сотрудника")
+            summary="Получить профиль текущего сотрудника (устаревший дубль)", deprecated=True,
+            description="Используйте GET /api/auth/me. Маршрут временно сохранён для совместимости фронтенда.")
 def profile(user: AppUser = Security(require_api_user)):
     return {"id": user.id, "username": user.username, "email": user.email, "full_name": user.full_name,
             "role": user.role, "need_password_change": user.must_change_password, "need_email": not bool(user.email)}
@@ -1191,21 +1236,25 @@ def import_history(_user: AppUser = Security(require_api_user), session: Session
 @router.get("/export/contracts", tags=["import-export"], responses=BINARY_RESPONSE,
             summary="Экспортировать отфильтрованные договоры построчно")
 def export_contracts_api(q: str = "", faculty_ids: list[int] = Query(default=[]),
-                         status_value: str = Query("", alias="status"), end_year: int | None = None, urgency: str = "",
+                         status_value: ContractStatusFilter | None = Query(None, alias="status"),
+                         end_year: int | None = None, urgency: ContractUrgencyFilter | None = Query(None),
                          _user: AppUser = Security(require_api_user), session: Session = Depends(get_session)):
     names = faculty_names(session, faculty_ids)
-    result, *_ = contract_registry(session, query_text=q, faculty=names, status=status_value,
-                                   end_year=str(end_year or ""), urgency=urgency, page=None)
+    result, *_ = contract_registry(session, query_text=q, faculty=names, status=status_value or "",
+                                   end_year=str(end_year or ""), urgency=urgency or "", page=None)
     return StreamingResponse(contracts_xlsx(result, names), media_type=XLSX,
                              headers={"Content-Disposition": 'attachment; filename="contracts.xlsx"'})
 
 
 @router.get("/export/applications", tags=["import-export"], responses=BINARY_RESPONSE,
-            summary="Экспортировать отфильтрованные заявки построчно")
+            summary="Экспортировать отфильтрованные заявки построчно",
+            description="Учитывает фильтры по году и бакету срочности поля «Действует до».")
 def export_applications_api(q: str = "", faculty_ids: list[int] = Query(default=[]),
-                            status_value: str = Query("", alias="status"), urgency: str = "",
+                            status_value: ApplicationStatusFilter | None = Query(None, alias="status"),
+                            end_year: int | None = Query(None), urgency: ApplicationUrgencyFilter | None = Query(None),
                             _user: AppUser = Security(require_api_user), session: Session = Depends(get_session)):
     names = faculty_names(session, faculty_ids)
-    result, _ = application_registry(session, query_text=q, faculty=names, status=status_value, urgency=urgency, page=None)
+    result, *_ = application_registry(session, query_text=q, faculty=names, status=status_value or "",
+                                      end_year=str(end_year or ""), urgency=urgency or "", page=None)
     return StreamingResponse(applications_xlsx(result, names), media_type=XLSX,
                              headers={"Content-Disposition": 'attachment; filename="applications.xlsx"'})

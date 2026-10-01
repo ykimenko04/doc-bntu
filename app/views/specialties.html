@@ -24,6 +24,9 @@
       </tr>
     {% else %}<tr><td colspan="5">Специальности не найдены.</td></tr>{% endfor %}</tbody>
   </table></div>
+  {% if request.state.user.role != 'ADMIN' %}
+    <p class="muted">Редактирование доступно администратору</p>
+  {% endif %}
   {% set registry_items_genitive='специальностей' %}{% include '_registry_pagination.html' %}
 </section>
 {% endblock %}

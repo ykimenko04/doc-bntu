@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from math import ceil
 
-from sqlalchemy import and_, exists, func, or_, select
+from sqlalchemy import and_, case, exists, func, or_, select
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from ..models import (
@@ -168,6 +168,7 @@ def application_registry(
     query_text: str = "",
     faculty: str | list[str] = "",
     status: str = "",
+    end_year: str = "",
     urgency: str = "",
     page: int | None = 1,
 ):
@@ -188,15 +189,38 @@ def application_registry(
         )))
     if status in APPLICATION_STATUSES:
         conditions.append(Application.status == status)
-    if urgency == URGENCY_DUE_30:
-        conditions.append(Application.date_end <= date.today() + timedelta(days=30))
+    if end_year.isdigit():
+        conditions.append(func.extract("year", Application.date_end) == int(end_year))
 
-    total = session.scalar(select(func.count(Application.id)).join(Organization).where(*conditions)) or 0
+    today = date.today()
+
+    def urgency_condition(bucket: str):
+        if bucket == URGENCY_DUE_30:
+            return Application.date_end <= today + timedelta(days=30)
+        if bucket == URGENCY_DUE_90:
+            return and_(Application.date_end > today + timedelta(days=30),
+                        Application.date_end <= today + timedelta(days=90))
+        if bucket == URGENCY_LATER:
+            return Application.date_end > today + timedelta(days=90)
+        return None
+
+    urgency_counts = {
+        key: session.scalar(select(func.count(Application.id)).join(Organization).where(
+            *conditions, urgency_condition(key)
+        )) or 0
+        for key, _label in URGENCY_BUCKETS
+    }
+    valid_urgencies = {key for key, _label in URGENCY_BUCKETS}
+    selected_urgency = urgency if urgency in valid_urgencies else ""
+    selected_condition = urgency_condition(selected_urgency)
+    selected_conditions = [*conditions, selected_condition] if selected_condition is not None else conditions
+
+    total = session.scalar(select(func.count(Application.id)).join(Organization).where(*selected_conditions)) or 0
     current_page, pages, offset = _page(total, page or 1)
     statement = (
         select(Application)
         .join(Organization)
-        .where(*conditions)
+        .where(*selected_conditions)
         .options(
             joinedload(Application.organization),
             selectinload(Application.faculty_links).selectinload(ApplicationFaculty.faculty),
@@ -205,10 +229,21 @@ def application_registry(
             selectinload(Application.orders).selectinload(Order.items).selectinload(OrderItem.faculty),
             selectinload(Application.orders).selectinload(Order.items).selectinload(OrderItem.annual_demands),
         )
-        .order_by(Application.signed_date.desc().nullslast(), Application.id.desc())
     )
+    if selected_urgency == URGENCY_DUE_30:
+        statement = statement.order_by(
+            case((and_(Application.status == "Заявка", Application.date_end < today), 0), else_=1),
+            Application.date_end.asc(), Application.signed_date.desc().nullslast(), Application.id.desc(),
+        )
+    else:
+        statement = statement.order_by(Application.signed_date.desc().nullslast(), Application.id.desc())
     if page is not None:
         statement = statement.offset(offset).limit(PAGE_SIZE)
     rows = session.scalars(statement).unique().all()
     faculties = session.scalars(select(Faculty.name).order_by(Faculty.name)).all()
-    return RegistryPage(rows, total, current_page, pages), faculties
+    end_years = session.scalars(
+        select(func.extract("year", Application.date_end))
+        .where(Application.date_end.is_not(None)).distinct()
+        .order_by(func.extract("year", Application.date_end))
+    ).all()
+    return RegistryPage(rows, total, current_page, pages), faculties, end_years, urgency_counts, selected_urgency

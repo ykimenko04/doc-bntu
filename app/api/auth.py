@@ -4,7 +4,7 @@ from fastapi.security import APIKeyCookie
 
 from ..models import AppUser, SessionLocal
 from ..services.audit_service import AuditActor
-from ..services.auth_service import authenticate, change_password, update_email, verify_password
+from ..services.auth_service import AccountDisabledError, authenticate, change_password, update_email, verify_password
 from .schemas import AuthenticatedUserResponse, ChangePasswordRequest, ErrorResponse, LoginRequest, UpdateEmailRequest
 
 
@@ -58,7 +58,10 @@ def login(payload: LoginRequest, request: Request):
     session = SessionLocal()
     try:
         client_ip = request.client.host if request.client else None
-        user = authenticate(session, payload.username, payload.password, client_ip)
+        try:
+            user = authenticate(session, payload.username, payload.password, client_ip)
+        except AccountDisabledError as error:
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, str(error)) from error
         if user is None:
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Неверный логин или пароль.")
         request.session["user_id"] = user.id

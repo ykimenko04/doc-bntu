@@ -14,7 +14,7 @@ from app.models import (
 from app.services.application_service import create_application, save_application_item
 from app.services.document_registry_service import PAGE_SIZE, application_registry, contract_registry
 from app.services.organization_service import save_item
-from app.services.status_service import URGENCY_DUE_30, URGENCY_LATER
+from app.services.status_service import URGENCY_DUE_30, URGENCY_DUE_90, URGENCY_LATER
 
 
 def _contract(session, organization, faculty, number, end_date, status="Активен"):
@@ -108,6 +108,28 @@ def test_contract_registry_combines_search_filters_urgency_and_scan(
     assert f"/organizations/{organization.id}#contract-{target.id}" in response.text
     assert "Есть подписанный скан" in response.text
     assert "Документы" not in response.text
+    assert 'data-optional="true"' in response.text
+    assert "Все факультеты" in response.text
+
+    without_faculty = client.get("/contracts", params={
+        "q": target.number,
+        "status": "Активен",
+        "end_year": target.end_date.year,
+    })
+    assert without_faculty.status_code == 200
+    assert target.number in without_faculty.text
+
+    toggle = client.get("/contracts", params={
+        "q": target.number,
+        "status": "Активен",
+        "end_year": target.end_date.year,
+        "urgency_choice": URGENCY_DUE_30,
+    }, follow_redirects=False)
+    assert toggle.status_code == 303
+    assert "urgency=due_30" in toggle.headers["location"]
+    assert "faculty=" not in toggle.headers["location"]
+    active = client.get(toggle.headers["location"])
+    assert 'urgency-due_30 active' in active.text
 
 
 def test_application_registry_combines_search_faculty_status_and_scan(
@@ -137,7 +159,7 @@ def test_application_registry_combines_search_faculty_status_and_scan(
     session.commit()
     _scan(session, organization.id, user.id, application_id=target.id)
 
-    page, faculties = application_registry(
+    page, faculties, _years, _counts, _urgency = application_registry(
         session,
         query_text="ЗАЯВКА-01",
         faculty="Факультет заявок",
@@ -171,6 +193,60 @@ def test_application_registry_combines_search_faculty_status_and_scan(
     assert "Действует до" in card.text
     assert 'value="2027-12-31"' in card.text
     assert "Получена:" not in card.text
+
+
+def test_application_registry_filters_year_and_all_urgency_buckets(
+    session, organization, user, actor, client
+):
+    today = date.today()
+    values = {
+        "OVERDUE": today - timedelta(days=5),
+        "SOON": today + timedelta(days=20),
+        "MIDDLE": today + timedelta(days=60),
+        "FAR": today + timedelta(days=120),
+    }
+    created = {
+        number: create_application(
+            session, organization.id, ["Факультет сроков"], number, "",
+            end_date.isoformat(), user.id, audit_actor=actor,
+        )
+        for number, end_date in values.items()
+    }
+    no_date = create_application(
+        session, organization.id, ["Факультет сроков"], "NO-DATE", "", "", user.id,
+        audit_actor=actor,
+    )
+
+    due, _faculties, years, counts, selected = application_registry(session, urgency=URGENCY_DUE_30)
+    assert [row.id for row in due.rows[:2]] == [created["OVERDUE"].id, created["SOON"].id]
+    assert no_date.id not in {row.id for row in due.rows}
+    assert counts == {URGENCY_DUE_30: 2, URGENCY_DUE_90: 1, URGENCY_LATER: 1}
+    assert selected == URGENCY_DUE_30
+    assert {int(year) for year in years} >= {value.year for value in values.values()}
+
+    middle, *_ = application_registry(session, urgency=URGENCY_DUE_90)
+    far, *_ = application_registry(session, urgency=URGENCY_LATER)
+    by_year, *_ = application_registry(session, end_year=str(values["FAR"].year), query_text="FAR")
+    assert [row.id for row in middle.rows] == [created["MIDDLE"].id]
+    assert [row.id for row in far.rows] == [created["FAR"].id]
+    assert [row.id for row in by_year.rows] == [created["FAR"].id]
+
+    page = client.get("/applications", params={"urgency": URGENCY_DUE_30})
+    assert page.status_code == 200
+    assert "Любой год окончания" in page.text
+    assert "31–90 дней" in page.text and "&gt; 90 дней" in page.text
+    assert "просрочен" in page.text
+    assert 'data-optional="true"' in page.text
+    assert 'urgency-due_30 active' in page.text
+
+    without_faculty = client.get("/applications", params={
+        "q": "FAR",
+        "status": "Заявка",
+        "end_year": values["FAR"].year,
+        "urgency": URGENCY_LATER,
+    })
+    assert without_faculty.status_code == 200
+    assert created["FAR"].number in without_faculty.text
 
 
 def test_organization_card_shows_and_expands_selected_application(

@@ -9,7 +9,7 @@
           <td><a href="/organizations/{{ contract.organization_id }}" onclick="event.stopPropagation()"><b>{{ contract.organization.name }}</b></a></td>
           <td><b>{{ contract.number or '—' }}</b><small>от {{ contract.start_date.strftime('%d.%m.%Y') }}</small></td>
           <td>{{ contract.faculty_names|join(', ') or '—' }}</td>
-          <td><mark class="{{ row.effective_status|status_class }}">{{ row.effective_status|document_status }}</mark></td>
+          <td><mark class="{{ contract.status|status_class }}">{{ contract.status|document_status }}</mark>{% if contract.active_agreement %}<small class="active-agreement-note">действует д.с. №{{ contract.active_agreement.number }} от {{ contract.active_agreement.date.strftime('%d.%m.%Y') }}</small>{% endif %}</td>
           <td><span class="date {{ row.expiry.css_class if row.expiry else 'neutral' }}">{{ contract.end_date.strftime('%d.%m.%Y') if contract.end_date else 'Не указана' }}</span>{% if row.expiry and row.expiry.overdue %}<small class="overdue-label">просрочен</small>{% endif %}</td>
           <td>{% if contract.has_signed_scan %}<span class="signed-file-indicator" title="Есть подписанный скан" aria-label="Есть подписанный скан">▣</span>{% else %}<span class="muted">—</span>{% endif %}</td>
           <td>{{ row.specialty_count }}</td>
@@ -23,7 +23,7 @@
         <tr class="clickable-row" onclick="location='/organizations/{{ application.organization_id }}?application_id={{ application.id }}#application-{{ application.id }}'">
           <td><b>{{ application.number or 'Не присвоен' }}</b></td>
           <td><a href="/organizations/{{ application.organization_id }}?application_id={{ application.id }}#application-{{ application.id }}" onclick="event.stopPropagation()"><b>{{ application.organization.name }}</b></a></td>
-          {% set application_expiry = urgency(application.date_end) %}<td><span class="date {{ application_expiry }}">{{ application.date_end.strftime('%d.%m.%Y') if application.date_end else 'Не указана' }}</span>{% if application.date_end and application.date_end < today() %}<small class="overdue-label">просрочен</small>{% endif %}</td>
+          {% set application_expiry = urgency(application.date_end) %}<td><span class="date {{ application_expiry }}">{{ application.date_end.strftime('%d.%m.%Y') if application.date_end else 'Не указана' }}</span>{% if application.status == 'Заявка' and application.date_end and application.date_end < today() %}<small class="overdue-label">просрочен</small>{% endif %}</td>
           <td>{{ application.signed_date.strftime('%d.%m.%Y') if application.signed_date else 'Не подписана' }}</td>
           <td>{{ application.faculty_names|join(', ') or '—' }}</td>
           <td><mark class="{{ application.status|status_class }}">{{ application.status|document_status }}</mark></td>

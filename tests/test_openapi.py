@@ -44,6 +44,7 @@ EXPECTED_OPERATIONS = {
     ("get", "/api/audit"), ("get", "/api/audit/metadata"),
     ("get", "/api/users"), ("post", "/api/users"),
     ("put", "/api/users/{user_id}"), ("post", "/api/users/{user_id}/reset-password"),
+    ("patch", "/api/users/{user_id}/status"),
     ("get", "/api/settings/profile"),
     ("post", "/api/import"), ("get", "/api/imports"),
     ("post", "/api/reconciliation"), ("get", "/api/reconciliation/{token}/export"),
@@ -128,6 +129,44 @@ def test_openapi_uses_multi_faculty_email_and_string_year_contracts():
     years = schema["components"]["schemas"]["OrderItemResponse"]["properties"]["years"]
     assert years["additionalProperties"]["type"] == "integer"
     assert "2026" in years["examples"][0]
+
+
+def test_openapi_nullable_fields_filter_enums_and_deprecated_profile_alias():
+    schema = app.openapi()
+    components = schema["components"]["schemas"]
+    qualification = components["OrderItemResponse"]["properties"]["qualification"]
+    assert {item.get("type") for item in qualification["anyOf"]} == {"string", "null"}
+    assert components["SpecialtyResponse"]["properties"]["name"]["type"] == "string"
+    assert components["SpecialtyResponse"]["properties"]["name"]["examples"] == ["1-37 01 03"]
+
+    def parameter(path, name):
+        return next(item for item in schema["paths"][path]["get"]["parameters"] if item["name"] == name)
+
+    assert parameter("/api/contracts", "status")["schema"]["anyOf"][0]["enum"] == ["Активен", "Закрыт"]
+    assert parameter("/api/contracts", "urgency")["schema"]["anyOf"][0]["enum"] == [
+        "due_30", "due_90", "due_over"
+    ]
+    assert parameter("/api/organizations", "status")["schema"]["anyOf"][0]["enum"] == ["Активен", "Закрыт"]
+    assert parameter("/api/organizations", "urgency")["schema"]["anyOf"][0]["enum"] == [
+        "due_30", "due_90", "due_over"
+    ]
+    assert parameter("/api/applications", "status")["schema"]["anyOf"][0]["enum"] == ["Заявка", "Закрыт"]
+    assert parameter("/api/applications", "urgency")["schema"]["anyOf"][0]["enum"] == [
+        "due_30", "due_90", "due_over"
+    ]
+    assert parameter("/api/export/contracts", "status")["schema"]["anyOf"][0]["enum"] == ["Активен", "Закрыт"]
+    assert parameter("/api/export/contracts", "urgency")["schema"]["anyOf"][0]["enum"] == [
+        "due_30", "due_90", "due_over"
+    ]
+    assert parameter("/api/export/applications", "status")["schema"]["anyOf"][0]["enum"] == ["Заявка", "Закрыт"]
+    assert parameter("/api/export/applications", "urgency")["schema"]["anyOf"][0]["enum"] == [
+        "due_30", "due_90", "due_over"
+    ]
+    assert parameter("/api/audit", "user_id")["schema"]["anyOf"][0]["type"] == "integer"
+    assert parameter("/api/applications", "end_year")["schema"]["anyOf"][0]["type"] == "integer"
+    assert parameter("/api/export/applications", "end_year")["schema"]["anyOf"][0]["type"] == "integer"
+    assert "фильтр по году" in schema["paths"]["/api/applications"]["get"]["description"]
+    assert schema["paths"]["/api/settings/profile"]["get"]["deprecated"] is True
 
 
 def test_swagger_is_enabled_by_default_and_can_be_disabled(monkeypatch):

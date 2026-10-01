@@ -9,7 +9,7 @@
   <td><b>{{ c.organization.name }}</b></td>
   <td>{{ row.faculty.name }}</td>
   <td>{{ c.number or '—' }}{% if c.has_signed_scan %}<span class="signed-file-indicator" title="Есть подписанный скан" aria-label="Есть подписанный скан">▣</span>{% endif %}{% if selected_faculty and row.faculty_count > 1 %}<span class="contract-scope-badge">{{ 'Все факультеты' if row.faculty_count == faculties|length else 'Мультифакультетный' }}</span>{% endif %}{% if c.active_agreement %}<small>Действует д.с. {{ c.active_agreement.number }} от {{ c.active_agreement.date.strftime('%d.%m.%Y') }}</small>{% endif %}</td>
-  <td>{% if c.active_agreement %}<mark class="{{ c.active_agreement.status|status_class }}">{{ c.active_agreement.status|document_status }}</mark>{% else %}<mark class="{{ c.status|status_class }}">{{ c.status|document_status }}</mark>{% endif %}</td>
+  <td><mark class="{{ c.status|status_class }}">{{ c.status|document_status }}</mark>{% if c.active_agreement %}<small class="active-agreement-note">действует д.с. №{{ c.active_agreement.number }} от {{ c.active_agreement.date.strftime('%d.%m.%Y') }}</small>{% endif %}</td>
   <td><span class="date {{ row.expiry.css_class if row.expiry else 'neutral' }}">{{ c.end_date.strftime('%d.%m.%Y') if c.end_date else 'Не указана' }}</span>{% if row.expiry and row.expiry.overdue %}<small class="overdue-label">просрочен</small>{% endif %}</td>
   <td title="{{ row.specialty_codes|join(', ') }}">{{ row.specialty_codes[:3]|join(', ') }}{% if row.specialty_codes|length > 3 %} · ещё {{ row.specialty_codes|length - 3 }}{% endif %}</td>
 </tr>

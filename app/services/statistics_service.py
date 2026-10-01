@@ -36,6 +36,18 @@ def _faculty_ids(document) -> set[int]:
     return item_ids or {link.faculty_id for link in document.faculty_links}
 
 
+def _is_active_contract(contract: Contract) -> bool:
+    """A relationship remains active while the contract or one of its d.s. is active."""
+    return contract.status == STATUS_ACTIVE or contract.active_agreement is not None
+
+
+def _active_contract_end_date(contract: Contract):
+    # Additional agreements currently have no validity-end field. Therefore an
+    # active d.s. supersedes the base contract term and cannot be classified as
+    # overdue by the closed contract's old end date.
+    return None if contract.active_agreement is not None else contract.end_date
+
+
 def registry_statistics(
     session,
     faculty_id: int | None = None,
@@ -51,6 +63,7 @@ def registry_statistics(
     contracts = session.scalars(select(Contract).options(
         selectinload(Contract.faculty_links).selectinload(ContractFaculty.faculty),
         selectinload(Contract.orders).selectinload(Order.items).selectinload(OrderItem.faculty),
+        selectinload(Contract.agreements),
     )).unique().all()
     applications = session.scalars(select(Application).options(
         selectinload(Application.faculty_links).selectinload(ApplicationFaculty.faculty),
@@ -71,11 +84,11 @@ def registry_statistics(
         row.organization_id for row in applications
         if row.created_at is not None and row.created_at >= cutoff
     }
-    active_contracts = [row for row in contracts if row.status == STATUS_ACTIVE]
+    active_contracts = [row for row in contracts if _is_active_contract(row)]
     active_applications = [row for row in applications if row.status == STATUS_APPLICATION]
     attention_contracts = sum(
-        expiry_urgency(row.end_date, today).bucket == URGENCY_DUE_30
-        for row in active_contracts if row.end_date is not None
+        expiry_urgency(end_date, today).bucket == URGENCY_DUE_30
+        for row in active_contracts if (end_date := _active_contract_end_date(row)) is not None
     )
     attention_applications = sum(
         expiry_urgency(row.date_end, today).bucket == URGENCY_DUE_30
