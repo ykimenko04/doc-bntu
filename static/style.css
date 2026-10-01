@@ -918,3 +918,181 @@ details form{
   .compare-form{display:grid}
   .order-toolbar{align-items:flex-start}
 }
+
+/* Первичная настройка (создание администратора) — экран входа в стиле React-приложения */
+.setup-page{
+  min-height:100vh;
+  display:grid;
+  grid-template-columns:1.05fr 0.95fr;
+  background:#fff
+}
+
+.setup-art{
+  background:#16253d;
+  position:relative;
+  padding:34px 8%;
+  color:#fff;
+  display:flex;
+  flex-direction:column;
+  overflow:hidden
+}
+
+.setup-art:after{
+  content:'';
+  position:absolute;
+  width:430px;
+  height:430px;
+  border:1px solid #3c536f;
+  border-radius:50%;
+  right:-140px;
+  bottom:-150px;
+  box-shadow:0 0 0 45px #1a2b45,0 0 0 46px #3c536f
+}
+
+.setup-logo{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  color:#fff;
+  font-size:10px;
+  line-height:1.15;
+  letter-spacing:.08em;
+  font-weight:600;
+  position:relative;
+  z-index:1
+}
+
+.setup-logo-mark{
+  display:grid;
+  place-items:center;
+  width:31px;
+  height:31px;
+  border-radius:9px;
+  background:#1268dc;
+  color:#fff;
+  font-style:normal
+}
+
+.setup-art-copy{
+  margin:auto 0;
+  max-width:450px;
+  position:relative;
+  z-index:1
+}
+
+.setup-art-copy h1{
+  font:800 44px/1.12 Manrope,sans-serif;
+  margin:0 0 20px;
+  letter-spacing:-.03em
+}
+
+.setup-art-copy em{
+  color:#81aaff;
+  font-style:normal
+}
+
+.setup-art-copy p{
+  color:#a9b6c9;
+  line-height:1.7;
+  font-size:14px;
+  max-width:350px
+}
+
+.setup-art-footer{
+  font-size:10px;
+  color:#71829c;
+  letter-spacing:.04em;
+  position:relative;
+  z-index:1
+}
+
+.setup-eyebrow{
+  font-size:10px;
+  letter-spacing:.13em;
+  color:#1268dc;
+  font-weight:700;
+  margin-bottom:11px
+}
+
+.setup-art .setup-eyebrow{
+  color:#81aaff
+}
+
+.setup-form-wrap{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:24px
+}
+
+.setup-form{
+  width:min(385px,100%);
+  display:grid;
+  gap:16px
+}
+
+.setup-form-heading{
+  margin-bottom:4px
+}
+
+.setup-form-heading h2{
+  font:800 28px/1.15 Manrope,sans-serif;
+  letter-spacing:-.02em;
+  margin:0;
+  color:#1d2a40
+}
+
+.setup-form-heading p{
+  font-size:13px;
+  color:#8d99a9;
+  margin:8px 0 0
+}
+
+.setup-form label{
+  display:grid;
+  gap:6px;
+  color:#4e5d74;
+  font-weight:600;
+  font-size:13px
+}
+
+.setup-form input{
+  border:1px solid #e0e7f0;
+  border-radius:6px;
+  padding:12px 13px;
+  outline:0;
+  color:#25324a
+}
+
+.setup-form input:focus{
+  border-color:#86aafc;
+  box-shadow:0 0 0 3px #eaf0ff
+}
+
+.setup-form .button{
+  width:100%;
+  text-align:center
+}
+
+@media (max-width:850px){
+  .setup-page{
+    grid-template-columns:1fr
+  }
+
+  .setup-art{
+    min-height:260px;
+    padding:25px 9%
+  }
+
+  .setup-art-copy{
+    margin:35px 0 20px
+  }
+
+  .setup-art-copy h1{
+    font-size:30px
+  }
+
+  .setup-form-wrap{
+    padding:30px 20px
+  }
+}

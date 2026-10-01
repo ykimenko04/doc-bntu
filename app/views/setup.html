@@ -4,16 +4,31 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Первичная настройка — Кадровый заказ</title>
-  <link rel="stylesheet" href="/static/style.css?v=20260921-2">
+  <link rel="stylesheet" href="/static/style.css?v=20261001-1">
   <link rel="stylesheet" href="/static/forms.css?v=20260921-1">
 </head>
-<body class="login-page">
-  <main class="login-card setup-card">
-    <div class="brand">◈ <b>Кадровый заказ</b></div>
-    <h1>Создание администратора</h1>
-    <p class="muted">Это одноразовая настройка при первом запуске системы.</p>
-    {% if error %}<p class="error">{{ error }}</p>{% endif %}
-    <form method="post" action="/setup" class="account-form">
+<body class="setup-page">
+  <div class="setup-art">
+    <div class="setup-logo">
+      <span class="setup-logo-mark">◈</span>
+      <span>КАДРОВЫЙ<br><b>ЗАКАЗ</b></span>
+    </div>
+    <div class="setup-art-copy">
+      <div class="setup-eyebrow">ПЕРВЫЙ ЗАПУСК СИСТЕМЫ</div>
+      <h1>Настройка<br><em>администратора.</em></h1>
+      <p>Создайте учётную запись администратора, чтобы начать работу с системой «Кадровый заказ».</p>
+    </div>
+    <div class="setup-art-footer">Белорусский национальный технический университет</div>
+  </div>
+
+  <div class="setup-form-wrap">
+    <form method="post" action="/setup" class="setup-form">
+      <div class="setup-form-heading">
+        <div class="setup-eyebrow">ДОБРО ПОЖАЛОВАТЬ</div>
+        <h2>Создание администратора</h2>
+        <p>Это одноразовая настройка при первом запуске системы.</p>
+      </div>
+      {% if error %}<p class="error">{{ error }}</p>{% endif %}
       <label>ФИО<input name="full_name" value="{{ full_name|default('') }}" required autofocus></label>
       <label>Логин<input name="username" value="{{ username|default('') }}" autocomplete="username" required></label>
       <label>Электронная почта<input name="email" type="email" value="{{ email|default('') }}" autocomplete="email" required></label>
@@ -22,6 +37,6 @@
       <p class="form-hint">Не менее 8 символов.</p>
       <button class="button">Создать администратора</button>
     </form>
-  </main>
+  </div>
 </body>
 </html>
